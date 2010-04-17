@@ -1,0 +1,6 @@
+Revision history for Perl extension Device::VantagePro.
+
+0.01  Fri Apr 16 11:17:11 2010
+	- original version; created by h2xs 1.23 with options
+		-AX --use-new-tests -n Device::VantagePro
+
