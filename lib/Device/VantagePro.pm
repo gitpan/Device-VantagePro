@@ -8,7 +8,7 @@ require Exporter;
 
 our @ISA = qw(Exporter);
 
-our $VERSION = '0.21';
+our $VERSION = '0.22';
 
 #-#use Win32::SerialPort qw(:STAT 0.19 );
 use Device::SerialPort qw(:STAT 0.19 );
@@ -40,7 +40,7 @@ sub new
   if ( ref($_[0]) eq "HASH" ) { %arg_hsh = %{ shift @_ } }
   else                        { %arg_hsh = @_ }
 
-  my $port = $arg_hsh{'port'} || "COM1";
+  my $port = $arg_hsh{'port'} || "/dev/ttyS0 ";
 
   #my $conf = $arg_hsh{'conf'} || 'Conf.ini';
   
@@ -695,7 +695,8 @@ __END__
 
 =head1 NAME
 
-Device::VantagePro - Perl module to read and control a Davis Vantage Pro Weather Station
+Device::VantagePro - Perl module to request data in real-time or archive and configure 
+a Davis Vantage Pro Weather Station that is equiped with a WeatherLink datalogger/serial port. 
 
 =head1 SYNOPSIS
 
@@ -719,7 +720,7 @@ Device::VantagePro - Perl module to read and control a Davis Vantage Pro Weather
       sleep 2; 
   }
 
-  # Or better yet 
+Or perhaps better yet 
 
   for my $i (1..2)
   {
@@ -728,7 +729,7 @@ Device::VantagePro - Perl module to read and control a Davis Vantage Pro Weather
        sleep 2;   # Sleep arbitary number of seconds no less than 1 sec. 
   }
 
-  # Now retrieve archive data 
+To retrieve archive data first requires a date/time stamp and then a call to do_dmpaft 
   
   # Create date/time stamp for April 17 2010 at 0805 
   my ($dstamp,$tstamp) = $vp_obj->make_date_time_stamp(2010,4,17,8,5);
@@ -746,9 +747,15 @@ Device::VantagePro - Perl module to read and control a Davis Vantage Pro Weather
 A module to provide direct access to many of the features of the Davis VantagePro Weather family of 
 weather stations. 
 
-Note: Module was developed and tested on a Linux operating system and relies upon the Unix specific
+This module was developed and tested on a Linux operating system and relies upon the Unix specific
 Device::SerialPort module. A port to Windows could be accomplished using the Win32::SerialPort module 
 which uses the same calls. See code for more details. 
+
+Some things to note: The Archive data packet and the Loop data packet provide different data values. For example, the 
+Loop data packet has a value for the 10-Minute ave wind speed while the Archive data packet has only the wind speed
+average for the archive period.  The Archive data packet only gives the instantaneous maximum wind speed over the archive
+period and not a true wind gust measurement as defined by NOAA as a maximum sustained wind speed over a 3 second 
+period, therefore wind gusts tend to be high.       
 
 =head1 METHODS
 
@@ -761,9 +768,9 @@ providing the communication parameters.
 
 Available arguements: baudrate, parity, databits, stopbits, port
 
-Defaults are as follows if not provided in hash.    
+Defaults for these argument parameters are as follows:    
 
-  $arg_hsh{'port'}   = "COM1";
+  $arg_hsh{'port'}   = "/dev/ttyS0";
   $arg_hsh{baudrate} = 19200;
   $arg_hsh{parity}   = "none";
   $arg_hsh{databits} = 8;
@@ -771,18 +778,19 @@ Defaults are as follows if not provided in hash.
 
 =head2 wake_up
 
-The device sleeps in order to conserve power after 2 minutes of inactivity. 
+The device sleeps in order to conserve power after 2 minutes of inactivity. A wake up 
+call is provided which conforms to B<Section IV Waking up the Console>
   
 	$vp_obj->wake_up();
 
 Sending a command when the console is sleeping might not wake up the device fast enough to 
 read the first character correctly. Because of this, you should always perform a wakeup call 
 before sending commands. Many of the calls such as start_loop, read_loop, get_one_loop, etc
-send a wake_up() command implicitly. 
+send a wake_up() command implicitly so there is no need to send one. 
 
 =head2 get_archive_period
 	
-Retrieves the set archive period for the device.  The archive period is the time period between 
+Retrieves the archive period for the device.  The archive period is the time period between 
 each archived data record.   
 	
     my $arc_period = $vp_obj->get_archive_period(); 
@@ -795,6 +803,8 @@ Sets the archive period. Acceptable values are 1, 5, 10, 15, 30, 60, 120 minutes
 documentation. 
 
     $vp_obj->set_archive_period(5) || warn "Archive Period not set" ;
+ 
+According to the documentation this call clears the archive data. 
  
 =head2 gettime
  
@@ -811,7 +821,7 @@ The values are returned in the same order as provided in the Davis documentatoin
 
 =head2 settime
 	
-Set the devices time using a reference to list compatible with the gettime returned ref.
+Set the device time using a reference to a list compatible with the gettime returned reference.
 
 The order is similar to the array returned by the perl localtime function. Here is an example 
 setting the device time to the server time. 	
@@ -822,20 +832,20 @@ setting the device time to the server time.
 
 =head2 start_loop
 
-Begins a loop data acquisition sequence. Input is the number of loops to read. If 
-no input a loop of 1 is assumed. The function returns and expects a read_loop call to 
-service the data which is delivered every 2-seconds per the documenation. I have found
+Begins a loop data acquisition sequence. Input is the number of loops to request. If 
+no value is provided a loop of 1 is assumed. The function returns and expects a read_loop call 
+to service the data which is delivered every 2-seconds per the documenation. I have found
 problems with higher numbered loops (>40 loops) and recommend the integrated get_one_loop() 
-call instead and read a loop data set at whatever rate you wish.  
+call instead and read a loop data packet at whatever rate you wish.  
 
     $vp_obj->start_loop(10);
 
 =head2 read_loop
 
-Reads the LOOP data format as identified in Section IX. Data Formats in the documenation. Note this
-only reads the later revision B loop format that is found in Vantage Pro device after April 2002.  
+Reads the LOOP data format as identified in B<Section IX Data Formats> in the documenation. Note this
+only reads the later revision B loop format that is found in Vantage Pro devices after April 2002.  
 
-The data is returned via a ref to hash. 
+The data is returned via a reference to a hash. 
 
     $vp_obj->start_loop();
     my $hsh_ref = $vp_obj->read_loop();
@@ -851,6 +861,9 @@ Combines a start_loop and a read_loop and returns a data hash.
 
 I have not tested to see how fast this function can be called before the device chokes. It will run 
 at a 2-second rep rate without a problem. 
+
+The Loop data packet has a value for the Next_Record. This can be monitored in a loop and used to trigger 
+an event to read the archive via do_dmpaft.   
 	
 =head2 make_date_time_stamp
 
@@ -863,7 +876,7 @@ time stamp.
 =head2 do_dmpaft
 
 Function to retrieve the archive data after a provided date and time stamp. Refer to the Davis 
-documentation Section IX. Data Formats / 3. DMP and DMPAFT data format.  
+documentation B<Section IX. Data Formats> for the sub-section concerning DMP and DMPAFT data format.  
 
 Functions requires a date stamp and time stamp as detailed in the documenation or provided in the 
 make_date_time_stamp function above. 
@@ -884,7 +897,6 @@ The returned value is a reference to a list of hashes, one hash for each archive
       # Do something with the hash reference.... 
 	  print Dumper $arc_ref; 
    } 
-
 
 =head1 SEE ALSO
 

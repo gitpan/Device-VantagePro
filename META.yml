@@ -1,7 +1,7 @@
 --- #YAML:1.0
 name:               Device-VantagePro
-version:            0.21
-abstract:           Perl module to read and control a Davis Vantage Pro Weather Station
+version:            0.22
+abstract:           Perl module to request data in real-time or archive and configure 
 author:
     - root <root@localdomain>
 license:            unknown
