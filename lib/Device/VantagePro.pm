@@ -8,7 +8,7 @@ require Exporter;
 
 our @ISA = qw(Exporter);
 
-our $VERSION = '0.22';
+our $VERSION = '0.23';
 
 #-#use Win32::SerialPort qw(:STAT 0.19 );
 use Device::SerialPort qw(:STAT 0.19 );
@@ -40,7 +40,7 @@ sub new
   if ( ref($_[0]) eq "HASH" ) { %arg_hsh = %{ shift @_ } }
   else                        { %arg_hsh = @_ }
 
-  my $port = $arg_hsh{'port'} || "/dev/ttyS0 ";
+  my $port = $arg_hsh{'port'} || "/dev/ttyS0";
 
   #my $conf = $arg_hsh{'conf'} || 'Conf.ini';
   
@@ -147,8 +147,10 @@ sub do_dmpaft
   my $vDateStamp = shift @_;
   my $vTimeStamp = shift @_; 
 
- # unless ( $vDateStamp || $vTimeStamp ) { die "No Date/Time Stamps given" } 
-
+  # If not date/time stamp then assume 0 which will down load the entire archive
+  unless ( $vDateStamp ) { $vDateStamp = 0 } 
+  unless ( $vTimeStamp ) { $vTimeStamp = 0 } 
+ 
   my $port_obj = $self->{'port_obj'}; 
   
   my $datetime = pack("ss",$vDateStamp, $vTimeStamp); 
@@ -188,8 +190,8 @@ sub do_dmpaft
   
  $crc = CRC_CCITT(substr($str,1,6) );
 
- print "Pages = $pages : rec = $rec_start $crc\n"; 
-	
+ print "Pages = $pages : rec = $rec_start Datestamp $vDateStamp $crc\n"; 
+  	
  $cnt_out = $port_obj->write( pack("h", 0x06) );
  
  #if ($pages == 513 ) { return -1 }
@@ -229,14 +231,14 @@ sub do_dmpaft
 		
 		  $hsh{'hour'}  = sprintf("%02d", int ( $hsh{'time_stamp'} / 100 )); 
 		  
-		  $hsh{'min'}  =  $hsh{'time_stamp'} - ($hsh{'hour'} * 100); 
+		  $hsh{'min'}  =  $hsh{'time_stamp'} - ($hsh{'hour'} * 100);  
  		  $hsh{'min'}  =  sprintf("%02d", $hsh{'min'}); 
  		
 		  $hsh{'time_stamp_fmt'}  =  "$hsh{'hour'}:$hsh{'min'}:00"; 
 		  $hsh{'date_stamp_fmt'}  =  "$hsh{'year'}_$hsh{'month'}_$hsh{'day'}"; 
 
 		  $hsh{'unixtime'} = timelocal(0,$hsh{min}, $hsh{hour},
-		                                     $hsh{day}, $hsh{month}-1, $hsh{year}-1900);
+		                                  $hsh{day}, $hsh{month}-1, $hsh{year}-1900);
 		  		  
 		  $hsh{'Air_Temp'} = unpack("s", substr($rec_str,4,2)) / 10; 
 		  $hsh{'Air_Temp_Hi'} = unpack("s", substr($rec_str,6,2)) / 10; 
@@ -260,7 +262,7 @@ sub do_dmpaft
 		  $hsh{'ET'} = unpack("C", substr($rec_str,29,1)) / 1000;
 
 		  $hsh{'Solar_Max'} = unpack("s", substr($rec_str,30,2)); 
-		  $hsh{'UV_Max'} = unpack("s", substr($rec_str,32,2));
+		  $hsh{'UV_Max'} = unpack("C", substr($rec_str,32,1));
 		  
 		  $hsh{'Forecast_Rule'} = unpack("C", substr($rec_str,33,1));
 
