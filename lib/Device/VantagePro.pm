@@ -8,7 +8,7 @@ require Exporter;
 
 our @ISA = qw(Exporter);
 
-our $VERSION = '0.23';
+our $VERSION = '0.24';
 
 #-#use Win32::SerialPort qw(:STAT 0.19 );
 use Device::SerialPort qw(:STAT 0.19 );
@@ -244,7 +244,8 @@ sub do_dmpaft
 		  $hsh{'Air_Temp_Hi'} = unpack("s", substr($rec_str,6,2)) / 10; 
 		  $hsh{'Air_Temp_Lo'} = unpack("s", substr($rec_str,8,2)) / 10;
 		  $hsh{'Rain_Clicks'} = unpack("s", substr($rec_str,10,2));
-		  $hsh{'Rain_Rate'}   = unpack("s", substr($rec_str,12,2)) / 100; # Inches per hour
+		  $hsh{'Rain_Rate_Clicks'}   = unpack("s", substr($rec_str,12,2));
+                  $hsh{'Rain_Rate'}   = $hsh{'Rain_Rate_Clicks'} / 100; # Inches per hour
           $hsh{'Barometric_Press'}   = unpack("s", substr $rec_str,14,2) / 1000;  
           $hsh{'Solar'}   = unpack("s", substr $rec_str,16,2);       # watt/m**2
           $hsh{'Wind_Samples'}  = unpack("s", substr $rec_str,18,2);   
@@ -353,7 +354,8 @@ sub parse_loop_blck
   $hsh{'Relative_Humidity'} = unpack("C", substr $blk,33,1);
   # Skip other humidities for now...
 
-  $hsh{'Rain_Rate'}  = unpack("s", substr $blk,41,2) / 100; # Inches per hr
+  $hsh{'Rain_Rate_Clicks'}  = unpack("s", substr $blk,41,2);
+  $hsh{'Rain_Rate'}  = $hsh{'Rain_Rate_Clicks'} / 100; # Inches per hr
   $hsh{'UV'}         = unpack("C", substr $blk,43,1);
   $hsh{'Solar'}  = unpack("s", substr $blk,44,2);       # watt/m**2
   $hsh{'Rain_Storm'} = unpack("s", substr $blk,46,2) / 100; # Inches per storm
@@ -403,8 +405,14 @@ sub get_eeprom
   my $item = shift @_;
  
   my ($loc, $size); 
-  # Just Archive period support todate.... More to follow 
+  # Not all supported.... More to follow 
   if ( uc($item) eq 'ARCHIVE_PERIOD' ){ $loc = '2D'; $size = '01' }
+  elsif ( uc($item) eq 'TIME_ZONE' ){ $loc = '11'; $size = '01' }
+  elsif ( uc($item) eq 'MANUAL_OR_AUTO' ){ $loc = '12'; $size = '01' }
+  elsif ( uc($item) eq 'DAYLIGHT_SAVINGS' ){ $loc = '13'; $size = '01' }
+  elsif ( uc($item) eq 'GMT_OFFSET' ){ $loc = '14'; $size = '02' }
+  elsif ( uc($item) eq 'GMT_OR_ZONE' ){ $loc = '16'; $size = '01' }
+  elsif ( uc($item) eq 'SETUP_BITS' ){ $loc = '2B'; $size = '01' }
   else { warn "$item not found"; return -1; }  
   
   my $port_obj = $self->{port_obj}; 
@@ -523,6 +531,96 @@ sub get_archive_period
 }
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+sub get_timezone
+{
+ my $self    = shift @_;
+
+ use DateTime::TimeZone;
+
+ # Calculate the time zone used by the VP and return as a TimeZone object
+ 
+ my $timezone;
+ if (hex $self->get_eeprom('gmt_or_zone')->[0])
+ {
+     # Unit is configured for GMT offset value
+     # Wow, this is messy!
+     my $dst = 0; # Manual daylight saving adjustment to make
+     if (hex $self->get_eeprom('manual_or_auto')->[0])
+     {
+         # Unit has daylight saving in manual
+         $dst = hex $self->get_eeprom('daylight_savings')->[0];
+     }
+     my $val = $self->get_eeprom('gmt_offset');  # Get offset in hours
+     my $offset = hex ($val->[1].$val->[0]);     # Combine the 2 bytes together
+     $offset -= 65536 if $offset > 32767;        # 2's complement if -ve
+     $offset /= 100;                             # Convert to hours
+     $offset += $dst;                            # Adjust for daylight saving if required
+     my $hours = int $offset;                    # The whole number of hours
+     my $minutes = abs ($offset - $hours) * 60;  # The number of minutes
+     $minutes = sprintf("%02d", $minutes);       # Prefix with 0 if required
+     my $tzstr = $hours.$minutes;                # The 2 together to create tz string
+     $tzstr *= -1 if $offset < 0 && $hours == 0; # Fix negative for 0 hours
+     $tzstr = sprintf("%+05d", $tzstr);          # The final formatted string
+     $timezone = DateTime::TimeZone->new( name => $tzstr );
+ }
+ else {
+     # Unit configured for specific timezone
+     my $tz = hex $self->get_eeprom('time_zone')->[0];
+     my @timezones = qw( Pacific/Kwajalein
+                         Pacific/Midway
+                         Pacific/Honolulu
+                         America/Anchorage
+                         America/Tijuana
+                         America/Denver
+                         America/Chicago
+                         America/Mexico_City
+                         America/Monterrey
+                         America/Bogota
+                         America/New_York
+                         America/Halifax
+                         America/Santiago
+                         America/St_Johns
+                         America/Sao_Paulo
+                         America/Argentina/Buenos_Aires
+                         Atlantic/South_Georgia
+                         Atlantic/Azores
+                         Europe/London
+                         Africa/Casablanca
+                         Europe/Berlin
+                         Europe/Paris
+                         Europe/Prague
+                         Europe/Athens
+                         Africa/Cairo
+                         Europe/Bucharest
+                         Africa/Harare
+                         Asia/Jerusalem
+                         Asia/Baghdad
+                         Europe/Moscow
+                         Asia/Tehran
+                         Asia/Muscat
+                         Asia/Kabul
+                         Asia/Karachi
+                         Asia/Kolkata
+                         Asia/Almaty
+                         Asia/Bangkok
+                         Asia/Shanghai
+                         Asia/Hong_Kong
+                         Asia/Tokyo
+                         Australia/Adelaide
+                         Australia/Darwin
+                         Australia/Brisbane
+                         Australia/Hobart
+                         Asia/Magadan
+                         Pacific/Fiji
+                         Pacific/Auckland
+                     );
+     $timezone = DateTime::TimeZone->new( name => $timezones[$tz] );
+ }
+
+ return $timezone;
+}
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 sub make_date_time_stamp
 {
  my $self    = shift @_;
@@ -556,6 +654,25 @@ sub make_date_time_stamp
   my $vTimeStamp = (100 * $hour) + $min; 
 
   return ($vDateStamp, $vTimeStamp);  
+}
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+sub get_setup_bits
+{
+ my $self    = shift @_;
+
+ my $rst = $self->get_eeprom('setup_bits');
+ my $enc = hex($rst->[0]);
+ my %setup_bits;
+ $setup_bits{TimeMode}          = $enc & 0x01;
+ $setup_bits{IsAM}              = $enc >> 1 & 0x01;
+ $setup_bits{MonthDayFormat}    = $enc >> 2 & 0x01;
+ $setup_bits{WindCupSize}       = $enc >> 3 & 0x01;
+ $setup_bits{RainCollectorSize} = $enc >> 4 & 0x03;
+ $setup_bits{Latitude}          = $enc >> 6 & 0x01;
+ $setup_bits{Longitude}         = $enc >> 7 & 0x01;
+
+ return \%setup_bits;
 }
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -703,6 +820,7 @@ a Davis Vantage Pro Weather Station that is equiped with a WeatherLink datalogge
 =head1 SYNOPSIS
 
   use Device::VantagePro;
+  use Data::Dumper;
   
   my %arg_hsh;  
   $arg_hsh{baudrate} = 19200;
@@ -810,7 +928,7 @@ According to the documentation this call clears the archive data.
  
 =head2 gettime
  
-Retreive the current device time
+Retrieve the current device time
  
     my $ref = $vp_obj->gettime(); 
  
@@ -819,7 +937,7 @@ Returns a reference to a list ordered as
 	#        hour   :  min    :   sec       month /    day  /     year    
 	print "$ref->[2]:$ref->[1]:$ref->[0] $ref->[4]/$ref->[3]/$ref->[5]\n"; 
  
-The values are returned in the same order as provided in the Davis documentatoin. 
+The values are returned in the same order as provided in the Davis documentation. 
 
 =head2 settime
 	
@@ -831,6 +949,23 @@ setting the device time to the server time.
     my $s_time = [ localtime() ]; 
     $s_time->[4] += 1; 
     $vp_obj->settime($s_time); 
+
+=head2 get_timezone
+
+Returns the timezone of the device as a DateTime::TimeZone object.
+
+The VantagePro does not deal with timezones particularly well. The time field
+contained in a record is the local time, with no information as to its
+timezone. This is problematic when the local time reverts from daylight saving
+time, as for the duration of that hour there will be multiple records
+containing the same time value, with no way of differentiating them other than
+the order that they have been recorded. In much the same way, if the timezone
+of the unit is changed, no record of this will be attached to each of the
+downloaded records.
+
+For the above reasons, it is recommended that the device is configured for a
+named timezone, rather than offset from GMT, as it is easier to compensate for
+daylight saving changes.
 
 =head2 start_loop
 
@@ -844,7 +979,7 @@ call instead and read a loop data packet at whatever rate you wish.
 
 =head2 read_loop
 
-Reads the LOOP data format as identified in B<Section IX Data Formats> in the documenation. Note this
+Reads the LOOP data format as identified in B<Section IX Data Formats> in the documentation. Note this
 only reads the later revision B loop format that is found in Vantage Pro devices after April 2002.  
 
 The data is returned via a reference to a hash. 
@@ -890,15 +1025,44 @@ returned. Also if no date/time stamp is provided the complete archive will be re
 
 The returned value is a reference to a list of hashes, one hash for each archive record. 
 
-   my $rst = $vp_obj->do_dmpaft($dstamp,$tstamp); 
+   my $ref = $vp_obj->do_dmpaft($dstamp,$tstamp); 
    unless ( @{$ref} ) { return 0 }
  
-   my $data_ref; 
    foreach my $arc_ref ( @{$ref} ) 
    {
       # Do something with the hash reference.... 
 	  print Dumper $arc_ref; 
    } 
+
+=head2 get_eeprom
+ 
+Retrieve specific EEPROM configuration settings. Currently the following parameters are supported:
+
+    ARCHIVE_PERIOD
+    TIME_ZONE
+    MANUAL_OR_AUTO
+    DAYLIGHT_SAVINGS
+    GMT_OFFSET
+    GMT_OR_ZONE
+    SETUP_BITS
+
+The return value is the raw hex value from the unit, so needs to be decoded:
+
+    my $rst = $self->get_eeprom('archive_period');
+    my $archive_period = hex($rst->[0]);
+
+=head2 get_setup_bits
+ 
+Retrieve the setup of the device. Returns a hashref with the following keys:
+
+    TimeMode
+    IsAM
+    MonthDayFormat
+    WindCupSize
+    RainCollectorSize
+    Latitude
+    Longitude
+
 
 =head1 SEE ALSO
 
